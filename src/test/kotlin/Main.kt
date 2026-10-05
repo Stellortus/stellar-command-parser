@@ -1,4 +1,4 @@
-import top.stellortus.command_parser.build
+import top.stellortus.command_parser.buildCommand
 import top.stellortus.command_parser.get
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -7,7 +7,7 @@ class Main {
 
     @Test
     fun test() {
-        val dispatcher = build {
+        val dispatcher = buildCommand {
             setHelper()
             literal("hello") {
                 description("你好")
@@ -18,6 +18,12 @@ class Main {
                     description("show Kotlin")
                     execute {
                         "Kotlin command!"
+                    }
+                    literal("id") {
+                        execute {
+                            val id = get<String>("id")
+                            "Hello Kotlin $id!"
+                        }
                     }
                 }
                 choice("language", "JS", "TS") {
@@ -47,7 +53,8 @@ class Main {
                 }
             }
         }
-        fun assertCommandEquals(expected: String, command: String) = assertEquals(expected, dispatcher.execute(command))
+        fun assertCommandEquals(expected: String, command: String, vararg arguments: Pair<String, Any?>) = assertEquals(expected, dispatcher.bind(*arguments).execute(command))
+
 
         assertCommandEquals("Hello world!","hello")
         assertCommandEquals("Kotlin command!", "hello kotlin")
@@ -68,5 +75,8 @@ class Main {
         assertCommandEquals("help <command:String...>", "help help")
         assertCommandEquals("Hello, 1!", "hello 1")
         assertCommandEquals("Hello, 1!", "hello 01")
+
+        val id = "123123"
+        assertCommandEquals("Hello Kotlin 123123!", "hello kotlin id", "id" to id)
     }
 }

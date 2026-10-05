@@ -1,40 +1,51 @@
 package top.stellortus.command_parser
 
+class CommandDispatcher(val root: RootNode, private val variables: Map<String, Any?> = emptyMap()) {
 
-class CommandDispatcher(val root: RootNode) {
-    private fun execute(tokens: List<String>): Any {
-        val context = CommandContext()
-        val node = resolve(root, tokens, 0, context)
+    /** Returns a dispatcher with [variables] additionally bound; this instance is left untouched. */
+    fun bind(vararg variables: Pair<String, Any?>): CommandDispatcher =
+        CommandDispatcher(root, this.variables + variables.toList())
+
+    private fun execute(tokens: List<String>, context: CommandContext): Any {
+        val match = resolve(root, tokens, 0, context, emptyList())
             ?: throw IllegalArgumentException("Unknown command: ${tokens.joinToString(" ")}")
 
-        return node.execute?.invoke(context)
+        context.setScopes(match.path.dropLast(1))
+        return match.node.execute?.invoke(context)
             ?: throw IllegalStateException("Command is not executable: ${tokens.joinToString(" ")}")
     }
 
-    private fun resolve(node: CommandNode, tokens: List<String>, step: Int, context: CommandContext): CommandNode? {
-        if (step >= tokens.size) return node
+    private fun resolve(
+        node: CommandNode,
+        tokens: List<String>,
+        step: Int,
+        context: CommandContext,
+        path: List<String>,
+    ): Match? {
+        if (step >= tokens.size) return Match(node, path)
 
         val token = tokens[step]
         for (child in node.nextNodes.sortedBy { it.priority }) {
+            val childPath = path + child.name
             when (child) {
                 is LiteralNode -> if (child.name == token) {
-                    resolve(child, tokens, step + 1, context)?.let { return it }
+                    resolve(child, tokens, step + 1, context, childPath)?.let { return it }
                 }
 
                 is ArgumentNode<*> -> {
                     val end = if (child.argument.greedy) tokens.size else step + 1
                     val label = tokens.subList(step, end).joinToString(" ")
                     if (child.argument.match(label)) {
-                        context.put(child.name, child.argument.parse(label))
-                        resolve(child, tokens, end, context)?.let { return it }
-                        context.remove(child.name)
+                        advance(context, childPath.joinToString("/"), child.argument.parse(label)) {
+                            resolve(child, tokens, end, context, childPath)
+                        }?.let { return it }
                     }
                 }
 
                 is ChoiceNode -> if (token in child.names) {
-                    context.put(child.variableName, token)
-                    resolve(child, tokens, step + 1, context)?.let { return it }
-                    context.remove(child.variableName)
+                    advance(context, childPath.joinToString("/"), token) {
+                        resolve(child, tokens, step + 1, context, childPath)
+                    }?.let { return it }
                 }
 
                 else -> {}
@@ -43,13 +54,32 @@ class CommandDispatcher(val root: RootNode) {
         return null
     }
 
+    /**
+     * Binds [key] while [descend] runs. A successful match keeps the binding (the executing block
+     * needs it); backtracking restores the previous value instead of dropping it.
+     */
+    private fun advance(context: CommandContext, key: String, value: Any?, descend: () -> Match?): Match? {
+        val had = context.has(key)
+        val previous = context.peek(key)
+        context.put(key, value)
+        val match = descend()
+        if (match == null) {
+            if (had) context.put(key, previous) else context.remove(key)
+        }
+        return match
+    }
+
+    private class Match(val node: CommandNode, val path: List<String>)
+
     fun execute(command: String): Any {
-        return this.execute(command.trim().split(Regex("\\s+")).filter { it.isNotEmpty() })
+        val context = CommandContext()
+        context.putAll(variables)
+        return execute(command.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }, context)
     }
 
 }
 
-fun build(block: RootNode.() -> Unit): CommandDispatcher {
+fun buildCommand(block: RootNode.() -> Unit): CommandDispatcher {
     val root = RootNode()
     with(root) {
         block()
