@@ -1,12 +1,19 @@
 package top.stellortus.command_parser
 
-class CommandDispatcher(val root: RootNode, private val variables: Map<String, Any?> = emptyMap()) {
+class CommandDispatcher<T : CommandContext> internal constructor(
+    val root: RootNode<T>,
+    private val variables: Map<String, Any?>,
+    /** Null when nobody has supplied a context yet, i.e. `withContext(...)` is still required. */
+    private val contextFactory: (() -> T)?,
+) {
 
-    /** Returns a dispatcher with [variables] additionally bound; this instance is left untouched. */
-    fun bind(vararg variables: Pair<String, Any?>): CommandDispatcher =
-        CommandDispatcher(root, this.variables + variables.toList())
+    fun bind(vararg variables: Pair<String, Any?>): CommandDispatcher<T> =
+        CommandDispatcher(root, this.variables + variables.toList(), contextFactory)
 
-    private fun execute(tokens: List<String>, context: CommandContext): Any {
+    fun withContext(context: T): CommandDispatcher<T> =
+        CommandDispatcher(root, variables) { context }
+
+    private fun execute(tokens: List<String>, context: T): Any {
         val match = resolve(root, tokens, 0, context, emptyList())
             ?: throw IllegalArgumentException("Unknown command: ${tokens.joinToString(" ")}")
 
@@ -16,19 +23,19 @@ class CommandDispatcher(val root: RootNode, private val variables: Map<String, A
     }
 
     private fun resolve(
-        node: CommandNode,
+        node: CommandNode<T>,
         tokens: List<String>,
         step: Int,
-        context: CommandContext,
+        context: T,
         path: List<String>,
-    ): Match? {
+    ): Match<T>? {
         if (step >= tokens.size) return Match(node, path)
 
         val token = tokens[step]
         for (child in node.nextNodes.sortedBy { it.priority }) {
             val childPath = path + child.name
             when (child) {
-                is LiteralNode -> if (child.name == token) {
+                is LiteralNode<*> -> if (child.name == token) {
                     resolve(child, tokens, step + 1, context, childPath)?.let { return it }
                 }
 
@@ -42,7 +49,7 @@ class CommandDispatcher(val root: RootNode, private val variables: Map<String, A
                     }
                 }
 
-                is ChoiceNode -> if (token in child.names) {
+                is ChoiceNode<*> -> if (token in child.names) {
                     advance(context, childPath.joinToString("/"), token) {
                         resolve(child, tokens, step + 1, context, childPath)
                     }?.let { return it }
@@ -58,7 +65,7 @@ class CommandDispatcher(val root: RootNode, private val variables: Map<String, A
      * Binds [key] while [descend] runs. A successful match keeps the binding (the executing block
      * needs it); backtracking restores the previous value instead of dropping it.
      */
-    private fun advance(context: CommandContext, key: String, value: Any?, descend: () -> Match?): Match? {
+    private fun advance(context: T, key: String, value: Any?, descend: () -> Match<T>?): Match<T>? {
         val had = context.has(key)
         val previous = context.peek(key)
         context.put(key, value)
@@ -69,20 +76,30 @@ class CommandDispatcher(val root: RootNode, private val variables: Map<String, A
         return match
     }
 
-    private class Match(val node: CommandNode, val path: List<String>)
+    private class Match<T : CommandContext>(val node: CommandNode<T>, val path: List<String>)
 
     fun execute(command: String): Any {
-        val context = CommandContext()
+        val context = contextFactory?.invoke()
+            ?: throw IllegalStateException("No context set: call withContext(...) before execute(...)")
+
+        context.clear()
         context.putAll(variables)
         return execute(command.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }, context)
     }
 
 }
 
-fun buildCommand(block: RootNode.() -> Unit): CommandDispatcher {
-    val root = RootNode()
-    with(root) {
-        block()
-    }
-    return CommandDispatcher(root)
+/** A plain [CommandContext] needs no arguments, so this form is directly executable. */
+@JvmName("buildCommandOf")
+fun buildCommand(block: RootNode<CommandContext>.() -> Unit): CommandDispatcher<CommandContext> {
+    val root = RootNode<CommandContext>()
+    root.block()
+    return CommandDispatcher(root, emptyMap()) { CommandContext() }
+}
+
+/** [T] has to be constructed by the caller, so `withContext(...)` is required before executing. */
+fun <T : CommandContext> buildCommand(block: RootNode<T>.() -> Unit): CommandDispatcher<T> {
+    val root = RootNode<T>()
+    root.block()
+    return CommandDispatcher(root, emptyMap(), null)
 }
