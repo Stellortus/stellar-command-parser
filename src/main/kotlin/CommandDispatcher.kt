@@ -1,7 +1,8 @@
 package top.stellortus.command_parser
 
 import top.stellortus.command_parser.exceptions.CommandNotExecutableException
-import top.stellortus.command_parser.exceptions.EmptyContextException
+import top.stellortus.command_parser.exceptions.ContextUndefinedException
+import top.stellortus.command_parser.exceptions.DeprecatedResolverUndefinedException
 import top.stellortus.command_parser.exceptions.PermissionDeniedException
 import top.stellortus.command_parser.exceptions.UnknownCommandException
 
@@ -12,6 +13,8 @@ class CommandDispatcher<T : CommandContext> internal constructor(
     private val contextFactory: (() -> T)?,
     internal val permissionProvider: ((T) -> Int) = { Int.MIN_VALUE }
 ) {
+
+    private var resolver: ((String) -> Unit)? = null
 
     @Suppress("unused")
     fun bind(vararg variables: Pair<String, Any?>): CommandDispatcher<T> =
@@ -25,6 +28,10 @@ class CommandDispatcher<T : CommandContext> internal constructor(
     fun permissionProvider(provider: (T) -> Int): CommandDispatcher<T> =
         CommandDispatcher(root, variables, contextFactory, provider)
 
+    @Suppress("unused")
+    fun deprecatedResolver(resolver: (String) -> Unit) {
+        this.resolver = resolver
+    }
 
     private fun resolve(
         node: CommandNode<T>,
@@ -81,7 +88,7 @@ class CommandDispatcher<T : CommandContext> internal constructor(
     @Suppress("unused")
     fun execute(command: String): Any {
         val context = contextFactory?.invoke()
-            ?: throw EmptyContextException("No context set: call withContext(...) before execute(...)")
+            ?: throw ContextUndefinedException("No context set: call withContext(...) before execute(...)")
 
         context.clear()
         context.putAll(variables)
@@ -92,14 +99,17 @@ class CommandDispatcher<T : CommandContext> internal constructor(
 
         val currentPermission = permissionProvider(context)
         if (currentPermission < matchingNode.permission) {
-            throw PermissionDeniedException("Current permission($currentPermission)" +
-                    " isn't allowed to execute “$command”(${matchingNode.permission} required)!")
+            throw PermissionDeniedException(
+                "Current permission($currentPermission)" +
+                        " isn't allowed to execute “$command”(${matchingNode.permission} required)!"
+            )
         }
-        // Refreshed per run rather than installed once at construction: bind/withContext/permissionProvider
-        // all derive new dispatchers that share one root, so an install-time value would be whichever
-        // dispatch happened to be built last, not the one running now.
         root.permissionProvider = permissionProvider
-        return matchingNode.execute?.invoke(context)
+        matchingNode.deprecatedValue?.let {
+            resolver?.invoke(it)
+                ?: throw DeprecatedResolverUndefinedException("No `dispatcher.deprecatedResolver` invoked with a node deprecated!")
+        }
+        return matchingNode.executeBehaviour?.invoke(context)
             ?: throw CommandNotExecutableException("Command is not executable: ${tokens.joinToString(" ")}")
     }
 }

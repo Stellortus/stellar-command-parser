@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "top.stellortus"
-version = "1.0-SNAPSHOT"
+version = "1.3.0"
 
 repositories {
     mavenCentral()
@@ -27,6 +27,5 @@ tasks.test {
 }
 
 tasks.named<JavaExec>("run") {
-    // Windows 控制台默认不是 UTF-8，显式指定以免中文提示乱码
     jvmArgs("-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8")
 }

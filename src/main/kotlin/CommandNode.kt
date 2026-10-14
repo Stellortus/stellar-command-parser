@@ -7,7 +7,7 @@ typealias ExecuteBehaviour<T> = T.() -> Any
 
 val comparator = compareBy<CommandNode<*>>({ it.priority }, { it.pathName })
 
-@CommandDslMarker
+@NodeDsl
 abstract class CommandNode<T : CommandContext>(private val parent: CommandNode<T>?, val name: String) {
     /**
      * The names from the root down to this node, joined with `/`. Siblings are kept in a
@@ -21,9 +21,11 @@ abstract class CommandNode<T : CommandContext>(private val parent: CommandNode<T
     internal val nextNodes: SortedSet<CommandNode<T>> =
         sortedSetOf(comparator)
 
-    internal var execute: ExecuteBehaviour<T>? = null
-    var description: String? = null
+    internal var executeBehaviour: ExecuteBehaviour<T>? = null
+    var commandDescription: String? = null
     internal var permission: Int = Int.MIN_VALUE
+
+    internal var deprecatedValue: String? = null
 
     open val priority: Int get() = 0
 
@@ -65,11 +67,11 @@ abstract class CommandNode<T : CommandContext>(private val parent: CommandNode<T
         child(variableName, { ChoiceNode(this, variableName, names.toSet()) }, block)
 
     fun execute(block: ExecuteBehaviour<T>) {
-        this.execute = block
+        this.executeBehaviour = block
     }
 
     fun description(description: String) {
-        this.description = description
+        this.commandDescription = description
     }
 
     fun requirePermission(permission: Int) {
@@ -78,6 +80,10 @@ abstract class CommandNode<T : CommandContext>(private val parent: CommandNode<T
         )
 
         this.permission = permission
+    }
+
+    fun deprecated(replaceWith: String) {
+        this.deprecatedValue = replaceWith
     }
 }
 
@@ -97,7 +103,7 @@ private fun <T : CommandContext> helpLines(
 
     val currentHelp = node.takeIf { it !is RootNode }?.let { node ->
         val path = prefix.joinToString(" ")
-        node.description?.let { "$path → $it" } ?: path
+        node.commandDescription?.let { "$path → $it" } ?: path
     }
 
     val lines = mutableListOf<String>()
@@ -105,7 +111,7 @@ private fun <T : CommandContext> helpLines(
     lines.addAll(
         commands.map { node ->
             val path = (prefix + node.displayName()).joinToString(" ")
-            node.description?.let { "$path → $it" } ?: path
+            node.commandDescription?.let { "$path → $it" } ?: path
         }
     )
     return lines.joinToString("\n")

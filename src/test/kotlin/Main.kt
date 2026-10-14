@@ -2,7 +2,8 @@ import org.junit.jupiter.api.assertThrows
 import top.stellortus.command_parser.CommandContext
 import top.stellortus.command_parser.CommandDispatcher
 import top.stellortus.command_parser.buildCommand
-import top.stellortus.command_parser.exceptions.EmptyContextException
+import top.stellortus.command_parser.exceptions.ContextUndefinedException
+import top.stellortus.command_parser.exceptions.DeprecatedResolverUndefinedException
 import top.stellortus.command_parser.exceptions.IllegalPermissionSettingException
 import top.stellortus.command_parser.exceptions.PermissionDeniedException
 import kotlin.test.Test
@@ -85,10 +86,12 @@ class Main {
             hello <world:String>
         """.trimIndent(), "help hello"
         )
-        assertCommandEquals("""
+        assertCommandEquals(
+            """
             help → 显示此帮助页面
             help <command:String...>
-        """.trimIndent(), "help help")
+        """.trimIndent(), "help help"
+        )
         assertCommandEquals("Hello, 1!", "hello 1")
         assertCommandEquals("Hello, 1!", "hello 01")
     }
@@ -138,7 +141,7 @@ class Main {
             }
         }.bind("name" to "Stellortus")
         with(dispatcher) {
-            assertCommandThrows<EmptyContextException>("hello")
+            assertCommandThrows<ContextUndefinedException>("hello")
             withContext(IdContext(1)).apply {
                 assertCommandEquals("Hello Stellortus 2!", "hello")
                 assertCommandEquals("Hello Stellortus 3!", "hello")
@@ -167,7 +170,7 @@ class Main {
                         "Hello address, $address"
                     }
                     integer("id") {
-                        choice("group", "a", "b", "c"){
+                        choice("group", "a", "b", "c") {
                             mutate {
                                 add("d")
                             }
@@ -270,17 +273,45 @@ class Main {
                 assertCommandEquals("hello", "help hello")
             }
             this.permissionProvider { 2 }.apply {
-                assertCommandEquals("""
+                assertCommandEquals(
+                    """
                     hello
                     hello a
-                """.trimIndent(), "help hello")
+                """.trimIndent(), "help hello"
+                )
             }
             this.permissionProvider { 3 }.apply {
-                assertCommandEquals("""
+                assertCommandEquals(
+                    """
                     hello
                     hello a
                     hello b
-                """.trimIndent(), "help hello")
+                """.trimIndent(), "help hello"
+                )
+            }
+        }
+    }
+
+    @Test
+    fun deprecatedTest() {
+        val dispatcher = buildCommand {
+            literal("hello") {
+                execute {
+                    "hello"
+                }
+            }
+            literal("hallo") {
+                deprecated("hello")
+                execute {
+                    "hallo"
+                }
+            }
+        }
+
+        with(dispatcher) {
+            assertCommandThrows<DeprecatedResolverUndefinedException>("hallo")
+            deprecatedResolver { throw NullPointerException() }.apply {
+                assertCommandThrows<NullPointerException>("hallo")
             }
         }
     }
