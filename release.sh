@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+git update-index --chmod=+x gradlew
 set -e
 VERSION=$1
 git push origin master
