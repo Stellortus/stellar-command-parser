@@ -33,56 +33,52 @@ class CommandDispatcher<T : CommandContext> internal constructor(
         this.resolver = resolver
     }
 
+    private data class Match<T : CommandContext>(
+        val node: CommandNode<T>,
+        val nodeCount: Int,
+        val arguments: Map<String, Any?>,
+    )
+
     private fun resolve(
         node: CommandNode<T>,
         tokens: List<String>,
-        step: Int,
-        context: T,
-    ): CommandNode<T>? {
-        if (step >= tokens.size) return node
+        step: Int = 0,
+        nodeCount: Int = 0,
+        arguments: Map<String, Any?> = emptyMap(),
+    ): List<Match<T>> = buildList {
+        if (step >= tokens.size) {
+            add(Match(node, nodeCount, arguments))
+            return@buildList
+        }
 
         val token = tokens[step]
         for (child in node.nextNodes) {
             when (child) {
                 is LiteralNode<*> -> if (child.name == token) {
-                    resolve(child, tokens, step + 1, context)?.let { return it }
+                    addAll(resolve(child, tokens, step + 1, nodeCount + 1, arguments))
                 }
 
                 is ArgumentNode<*> -> {
                     val end = if (child.argument.greedy) tokens.size else step + 1
                     val label = tokens.subList(step, end).joinToString(" ")
                     if (child.argument.match(label)) {
-                        advance(context, child.name, child.argument.parse(label)) {
-                            resolve(child, tokens, end, context)
-                        }?.let { return it }
+                        addAll(resolve(
+                            child, tokens, end, nodeCount + 1,
+                            arguments + (child.name to child.argument.parse(label)),
+                        ))
                     }
                 }
 
                 is ChoiceNode<*> -> if (token in child.names) {
-                    advance(context, child.name, token) {
-                        resolve(child, tokens, step + 1, context)
-                    }?.let { return it }
+                    addAll(resolve(
+                        child, tokens, step + 1, nodeCount + 1,
+                        arguments + (child.name to token),
+                    ))
                 }
 
                 else -> {}
             }
         }
-        return null
-    }
-
-    /**
-     * Binds [key] while [descend] runs. A successful match keeps the binding (the executing block
-     * needs it); backtracking restores the previous value instead of dropping it.
-     */
-    private fun advance(context: T, key: String, value: Any?, descend: () -> CommandNode<T>?): CommandNode<T>? {
-        val had = context.has(key)
-        val previous = context.peek(key)
-        context.put(key, value)
-        val match = descend()
-        if (match == null) {
-            if (had) context.put(key, previous) else context.remove(key)
-        }
-        return match
     }
 
     @Suppress("unused")
@@ -94,8 +90,15 @@ class CommandDispatcher<T : CommandContext> internal constructor(
         context.putAll(variables)
         val tokens = command.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
 
-        val matchingNode = resolve(root, tokens, 0, context)
+        val matches = resolve(root, tokens)
+        // Count matched nodes, not consumed tokens: a greedy argument is still only one node.
+        // maxByOrNull keeps the first match on ties, preserving the sibling priority order.
+        val match = matches.filter { it.node.executeBehaviour != null }.maxByOrNull { it.nodeCount }
+            // Retain permission/error handling for complete paths without an execute block.
+            ?: matches.maxByOrNull { it.nodeCount }
             ?: throw UnknownCommandException("Unknown command: ${tokens.joinToString(" ")}")
+        context.putAll(match.arguments)
+        val matchingNode = match.node
 
         val currentPermission = permissionProvider(context)
         if (currentPermission < matchingNode.permission) {

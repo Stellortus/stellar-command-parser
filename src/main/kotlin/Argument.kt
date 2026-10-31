@@ -3,7 +3,7 @@ package top.stellortus.command_parser
 abstract class Argument {
     open val greedy: Boolean get() = false
 
-    /** Match order across sibling arguments: lower is tried first. */
+    /** Match order across sibling arguments: lower wins ties between paths with equal node counts. */
     abstract val priority: Int
 
     abstract fun parse(label: String): Any?

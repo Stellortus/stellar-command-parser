@@ -315,4 +315,29 @@ class Main {
             }
         }
     }
+
+    @Test
+    fun deepestNodeTest() {
+        val dispatcher = buildCommand {
+            literal("hello") {
+                greedy("text") {
+                    execute {
+                        "hello with greedy text: ${get("text")}"
+                    }
+                }
+                literal("to") {
+                    string("name") {
+                        greedy("text") {
+                            execute {
+                                "hello to ${get("name")}: ${get("text")}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        with(dispatcher) {
+            assertCommandEquals("hello to Stellortus: 1 2 3 4 5", "hello to Stellortus 1 2 3 4 5")
+        }
+    }
 }
