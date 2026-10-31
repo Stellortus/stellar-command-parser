@@ -27,7 +27,9 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Build with Gradle
-        run: ./gradlew build -Pversion=${{ steps.get_version.outputs.VERSION }}
+        run: |
+          chmod +x gradlew
+          ./gradlew build -Pversion=${{ steps.get_version.outputs.VERSION }}
 
       # 自动创建 Release 并上传 JAR
       - name: Create Release and Upload JAR
